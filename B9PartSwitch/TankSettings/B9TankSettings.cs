@@ -9,6 +9,8 @@ namespace B9PartSwitch
 {
     public static class B9TankSettings
     {
+        public const string structuralTankName = "Structural";
+
         private static Dictionary<string, TankType> tankTypes = new Dictionary<string,TankType>();
 
         public static bool LoadedTankDefs { get; private set; } = false;
@@ -18,7 +20,7 @@ namespace B9PartSwitch
             get
             {
                 var t = new TankType();
-                t.tankName = "Structural";
+                t.tankName = structuralTankName;
                 t.tankMass = 0f;
                 t.tankCost = 0f;
                 return t;
@@ -31,30 +33,26 @@ namespace B9PartSwitch
             CFGUtil.RegisterParseType<TankType>(B9TankSettings.GetTankType, x => x.tankName);
         }
 
-        public static void ModuleManagerPostLoad()
-        {
-            ReloadTankDefs();
-        }
+        public static void ModuleManagerPostLoad() => ReloadTankDefs();
 
         public static void ReloadTankDefs()
         {
             tankTypes.Clear();
 
             // Structural tank type is hard coded
-            tankTypes.Add(StructuralTankType.tankName, StructuralTankType);
-
-            ConfigNode[] nodes = GameDatabase.Instance.GetConfigNodes("B9_TANK_TYPE");
-            for (int i = 0; i < nodes.Length; i++)
+            tankTypes.Add(structuralTankName, StructuralTankType);
+            
+            foreach (var node in GameDatabase.Instance.GetConfigNodes("B9_TANK_TYPE"))
             {
                 TankType t = new TankType();
-                t.Load(nodes[i]);
+                t.Load(node);
                 if (tankTypes.ContainsKey(t.tankName))
                 {
-                    Debug.LogError("The tank type " + t.tankName + " already exists");
+                    Debug.LogError($"B9TankSettings: The tank type {t.tankName} already exists");
                     continue;
                 }
                 tankTypes.Add(t.tankName, t);
-                Debug.Log("B9TankSettings: registered tank type " + t.tankName);
+                Debug.Log($"B9TankSettings: registered tank type {t.tankName}");
             }
 
             LoadedTankDefs = true;
@@ -62,8 +60,7 @@ namespace B9PartSwitch
 
         public static TankType GetTankType(string name)
         {
-            if (!LoadedTankDefs)
-                throw new InvalidOperationException("The tank definitions have not been loaded yet (done after game database load)");
+            CheckTankDefs();
             if (string.IsNullOrEmpty(name))
                 return StructuralTankType;
             return tankTypes[name].Clone() as TankType;
@@ -71,9 +68,14 @@ namespace B9PartSwitch
 
         public static bool TankTypeExists(string name)
         {
-            if (!LoadedTankDefs)
-                throw new InvalidOperationException("The tank definitions have not been loaded yet (done after game database load)");
+            CheckTankDefs();
             return tankTypes.ContainsKey(name);
+        }
+
+        private static void CheckTankDefs()
+        {
+            if (!LoadedTankDefs)
+                throw new InvalidOperationException("The tank definitions have not been loaded yet (done after game database load). Perhaps ModuleManager is missing or out of date?");
         }
 
         // This will raise an exception when the resource is not found
@@ -81,7 +83,7 @@ namespace B9PartSwitch
         {
             PartResourceDefinition resource = PartResourceLibrary.Instance.GetDefinition(name);
             if (resource == null)
-                throw new KeyNotFoundException("No resource with the name " + name + " could be found");
+                throw new KeyNotFoundException($"No resource with the name {name} could be found");
             return resource;
         }
     }

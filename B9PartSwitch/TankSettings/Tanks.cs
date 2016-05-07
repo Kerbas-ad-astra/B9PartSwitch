@@ -20,8 +20,10 @@ namespace B9PartSwitch
         {
             string outStr = "Tank Resource:";
             if (resourceDefinition != null)
-                outStr += " Resource Name = " + ResourceName;
-            outStr += " unitsPerVolume = " + unitsPerVolume.ToString();
+                outStr += $" Resource Name = {ResourceName}";
+            else
+                outStr += " Null resource";
+            outStr += $" unitsPerVolume = {unitsPerVolume}";
             return outStr;
         }
     }
@@ -56,35 +58,26 @@ namespace B9PartSwitch
 
         public IEnumerable<string> ResourceNames => resources.Select(r => r.ResourceName);
 
-        public bool IsStructuralTankType => (tankName == "Structural") && (tankMass == 0f) && (tankCost == 0f) && (resources.Count == 0);
+        public bool IsStructuralTankType => (tankName == B9TankSettings.structuralTankName) && (tankMass == 0f) && (tankCost == 0f) && (resources.Count == 0);
 
-        public float ResourceUnitCost => resources.Sum(r => r.resourceDefinition.unitCost);
+        public float ResourceUnitCost => resources.Sum(r => r.unitsPerVolume * r.resourceDefinition.unitCost);
 
         #endregion
 
-        public IEnumerator<TankResource> GetEnumerator()
-        {
-            return resources.GetEnumerator();
-        }
+        public IEnumerator<TankResource> GetEnumerator() => resources.GetEnumerator();
 
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            return GetEnumerator();
-        }
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
         public override string ToString()
         {
-            string outStr = "TankType: " + tankName;
-            outStr += ", tankMass = " + tankMass.ToString();
-            outStr += ", tankCost = " + tankCost.ToString();
-            outStr += ", number of resources: " + ResourcesCount.ToString();
-            for (int i = 0; i < ResourcesCount; i++ )
+            string outStr = $"TankType: {tankName}, mass = {tankMass}, cost = {tankCost}";
+            foreach (var resource in resources)
             {
                 outStr += "\n\t ";
-                if (resources[i] != null)
-                    outStr += resources[i].ToString();
+                if (resource != null)
+                    outStr += resource.ToString();
                 else
-                    outStr += "Null Resource";
+                    outStr += "Null Tank Resource";
             }
             return outStr;
         }

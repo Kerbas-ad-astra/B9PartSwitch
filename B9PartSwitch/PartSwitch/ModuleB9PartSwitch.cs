@@ -7,40 +7,6 @@ namespace B9PartSwitch
 {
     public class ModuleB9PartSwitch : CFGUtilPartModule, IPartMassModifier, IPartCostModifier, IModuleInfo
     {
-        #region Constants
-
-        public static readonly string[] IncompatibleModuleNames = { "FSfuelSwitch",
-                                                                    "FSmeshSwitch",
-                                                                    "InterstallarFuelSwitch",
-                                                                    "InterstellarMeshSwitch",
-                                                                  };
-        public static readonly Type[] IncompatibleModuleTypes;
-
-        static ModuleB9PartSwitch()
-        {
-            List<Type> incompatibleTypes = new List<Type>();
-
-            foreach (var moduleName in  IncompatibleModuleNames)
-            {
-                try
-                {
-                    Type t = AssemblyLoader.GetClassByName(typeof(PartModule), moduleName);
-                    if (t == null)
-                        continue;
-                    
-                    incompatibleTypes.Add(t);
-                }
-                catch(Exception e)
-                {
-                    Debug.LogError("Exception thrown while getting type " + moduleName + ": " + e.ToString());
-                }
-            }
-
-            IncompatibleModuleTypes = incompatibleTypes.ToArray();
-        }
-
-        #endregion
-
         #region Public Fields
 
         [ConfigNodeSerialized]
@@ -64,7 +30,7 @@ namespace B9PartSwitch
 
         // Can't use built-in symmetry because it doesn't know how to find the correct module on the other part
         [KSPField(guiActiveEditor = true, isPersistant = true, guiName = "Subtype")]
-        [UI_ChooseOption(affectSymCounterparts = UI_Scene.None, options = new[] { "None" }, scene = UI_Scene.Editor, suppressEditorShipModified = true)]
+        [UI_ChooseOption(affectSymCounterparts = UI_Scene.None, scene = UI_Scene.Editor, suppressEditorShipModified = true)]
         public int subtypeIndexControl = 0;
 
         #endregion
@@ -90,20 +56,11 @@ namespace B9PartSwitch
 
         public TankType CurrentTankType => CurrentSubtype.tankType;
 
-        public float TankVolume
-        {
-            get
-            {
-                if (CurrentSubtype.HasTank)
-                    return baseVolume * CurrentSubtype.volumeMultiplier + CurrentSubtype.volumeAdded;
-                else
-                    return 0f;
-            }
-        }
+        public float CurrentVolume => CurrentSubtype.TotalVolume;
 
         public PartSubtype this[int index] => subtypes[index];
 
-        public bool UseSmallGUI => SubtypesCount < 4;
+        public bool ManagesResources => subtypes.Any(s => !s.tankType.IsStructuralTankType);
 
         public bool MaxTempManaged { get; private set; }
         public bool SkinMaxTempManaged { get; private set; }
@@ -144,26 +101,23 @@ namespace B9PartSwitch
             SkinMaxTempManaged = false;
             AttachNodeManaged = false;
 
-            for (int i = 0; i < subtypes.Count; i++)
+            foreach (var subtype in subtypes)
             {
-                PartSubtype subtype = subtypes[i];
                 subtype.SetParent(this);
                 subtype.OnStart();
                 TankType tank = subtype.tankType;
 
                 if (tank == null)
-                    LogError("Tank is null on subtype " + subtype.Name);
+                    LogError($"Tank is null on subtype {subtype.Name}");
 
-                if (tank.ResourcesCount > 0 && (TankVolumeForSubtype(i) <= 0f))
+                if (tank.ResourcesCount > 0 && (subtype.TotalVolume <= 0f))
                 {
-                    LogError("Subtype " + subtype.Name + " has a tank type with resources, but no volume is specifified");
+                    LogError($"Subtype {subtype.Name} has a tank type with resources, but no volume is specifified");
                     subtype.tankType = tank = B9TankSettings.StructuralTankType;
                 }
 
                 if (tank != null)
-                {
                     managedResourceNames.AddRange(tank.ResourceNames);
-                }
 
                 managedTransformNames.AddRange(subtype.transformNames);
                 managedStackNodeIDs.AddRange(subtype.NodeIDs);
@@ -180,25 +134,26 @@ namespace B9PartSwitch
                     }
                     else
                     {
-                        LogError("Error: Part subtype '" + subtype.Name + "' has an attach node defined, but part does not allow surface attachment (or the surface attach node could not be found)");
+                        LogError($"Error: Part subtype '{subtype.Name}' has an attach node defined, but part does not allow surface attachment (or the surface attach node could not be found)");
                     }
                 }
             }
 
             if (currentSubtypeIndex >= subtypes.Count || currentSubtypeIndex < 0)
                 currentSubtypeIndex = 0;
-
-            bool editor = (state == StartState.Editor);
             
             SetupGUI();
 
-            for (int i = 0; i < subtypes.Count; i++)
+            foreach (var subtype in subtypes)
             {
-                subtypes[i].DeactivateObjects();
-                if (editor)
-                    subtypes[i].DeactivateNodes();
+                if (subtype == CurrentSubtype)
+                    continue;
+
+                subtype.DeactivateObjects();
+                if (state == StartState.Editor)
+                    subtype.DeactivateNodes();
                 else
-                    subtypes[i].ActivateNodes();
+                    subtype.ActivateNodes();
             }
 
             UpdateSubtype(false);
@@ -209,34 +164,32 @@ namespace B9PartSwitch
         {
             // Check for incompatible modules
             bool modifiedSetup = false;
-
-            List<ModuleB9PartSwitch> otherModules = part.FindModulesImplementing<ModuleB9PartSwitch>();
-            for (int i = 0; i < otherModules.Count; i++)
+            
+            foreach (var otherModule in part.Modules.OfType<ModuleB9PartSwitch>())
             {
-                ModuleB9PartSwitch otherModule = otherModules[i];
                 if (otherModule == this) continue;
                 bool destroy = false;
-                for (int j = 0; j < managedResourceNames.Count; j++)
+                foreach (var resourceName in managedResourceNames)
                 {
-                    if (otherModule.IsManagedResource(managedResourceNames[j]))
+                    if (otherModule.IsManagedResource(resourceName))
                     {
-                        LogError("Two ModuleB9PartSwitch modules cannot manage the same resource: " + managedResourceNames[j]);
+                        LogError($"Two ModuleB9PartSwitch modules cannot manage the same resource: {resourceName}");
                         destroy = true;
                     }
                 }
-                for (int j = 0; j < managedTransformNames.Count; j++)
+                foreach (var transformName in managedTransformNames)
                 {
-                    if (otherModule.IsManagedTransform(managedTransformNames[j]))
+                    if (otherModule.IsManagedTransform(transformName))
                     {
-                        LogError("Two ModuleB9PartSwitch modules cannot manage the same transform: " + managedTransformNames[j]);
+                        LogError($"Two ModuleB9PartSwitch modules cannot manage the same transform: {transformName}");
                         destroy = true;
                     }
                 }
-                for (int j = 0; j < managedStackNodeIDs.Count; j++)
+                foreach (var nodeID in managedStackNodeIDs)
                 {
-                    if (otherModule.IsManagedNode(managedStackNodeIDs[j]))
+                    if (otherModule.IsManagedNode(nodeID))
                     {
-                        LogError("Two ModuleB9PartSwitch modules cannot manage the same attach node: " + managedStackNodeIDs[j]);
+                        LogError($"Two ModuleB9PartSwitch modules cannot manage the same attach node: {nodeID}");
                         destroy = true;
                     }
                 }
@@ -261,30 +214,26 @@ namespace B9PartSwitch
 
                 if (destroy)
                 {
-                    LogWarning("ModuleB9PartSwitch with moduleID '" + otherModule.moduleID + "' is incomatible, and will be removed.");
-                    part.Modules.Remove(otherModule);
-                    Destroy(otherModule);
+                    LogWarning($"ModuleB9PartSwitch with moduleID '{otherModule.moduleID}' is incomatible, and will be removed.");
+                    part.RemoveModule(otherModule);
                     modifiedSetup = true;
                 }
             }
 
-            for (int i = 0; i < part.Modules.Count; i++)
+            if (ManagesResources)
             {
-                PartModule m = part.Modules[i];
-                if (m == null || m is ModuleB9PartSwitch)
-                    continue;
-                Type mType = m.GetType();
-
-                for (int j = 0; j < IncompatibleModuleTypes.Length; j++)
+                var incompatibleModules = new [] { "FSfuelSwitch", "InterstellarFuelSwitch" };
+                foreach (var moduleName in incompatibleModules)
                 {
-                    Type testType = IncompatibleModuleTypes[j];
-                    if (mType == testType || mType.IsSubclassOf(testType))
+                    while (part.Modules.Contains(moduleName))
                     {
-                        LogError("ModuleB9PartSwitch and " + m.moduleName + " cannot exist on the same part.  " + m.moduleName + " will be removed.");
-                        part.Modules.Remove(m);
-                        Destroy(m);
-                        modifiedSetup = true;
-                        break;
+                        var module = part.Modules[moduleName];
+                        if (module.IsNotNull())
+                        {
+                            LogError($"ModuleB9PartSwitch and {moduleName} cannot both manage resources on the same part.  {moduleName} will be removed.");
+                            part.RemoveModule(module);
+                            modifiedSetup = true;
+                        }
                     }
                 }
             }
@@ -302,15 +251,15 @@ namespace B9PartSwitch
 
         public float GetModuleMass(float baseMass, ModifierStagingSituation situation)
         {
-            return CurrentSubtype.addedMass + (TankVolume * CurrentTankType.tankMass);
+            return CurrentSubtype.addedMass + (CurrentVolume * CurrentTankType.tankMass);
         }
 
         public ModifierChangeWhen GetModuleMassChangeWhen() => ModifierChangeWhen.FIXED;
 
         public float GetModuleCost(float baseCost, ModifierStagingSituation situation)
         {
-            float cost = CurrentSubtype.addedCost + (TankVolume * CurrentTankType.tankCost);
-            cost += TankVolume * CurrentTankType.ResourceUnitCost;
+            float cost = CurrentSubtype.addedCost;
+            cost += (CurrentTankType.tankCost + CurrentTankType.ResourceUnitCost) * CurrentVolume;
             return cost;
         }
 
@@ -318,39 +267,27 @@ namespace B9PartSwitch
 
         public override string GetInfo()
         {
-            string outStr = "<b>" + subtypes.Count.ToString() + " Subtypes:</b>";
-            for (int i = 0; i < subtypes.Count; i++)
+            string outStr = "";
+            foreach (var subtype in subtypes)
             {
-                outStr += "\n  <b>- " + subtypes[i].title + "</b>";
-                int resourceCount = subtypes[i].tankType.ResourcesCount;
-                if (resourceCount > 0)
-                {
-                    outStr += "\n      <b><color=#99ff00ff>Resources:</color></b>";
-                    float volume = TankVolumeForSubtype(i);
-                    for (int j = 0; j < resourceCount; j++)
-                        outStr += "\n      <b>- " + subtypes[i].tankType.resources[j].ResourceName + "</b>: " + (subtypes[i].tankType.resources[j].unitsPerVolume * volume).ToString("F1");
-                }
+                outStr += $"\n<b>- {subtype.title}</b>";
+                foreach (var resource in subtype.tankType)
+                    outStr += $"\n  <b><color=#99ff00ff>- {resource.ResourceName}</color></b>: {resource.unitsPerVolume * subtype.TotalVolume :F1}";
             }
             return outStr;
         }
 
-        public string GetModuleTitle()
-        {
-            return "Switchable Part";
-        }
+        public string GetModuleTitle() => $"Switchable Part ({SubtypesCount} Subtypes)";
 
         public string GetPrimaryField()
         {
-            string outStr = "<b>" + subtypes.Count.ToString() + " Subtypes</b>";
+            string outStr = $"<b>{subtypes.Count} Subtypes</b>";
             if (baseVolume > 0)
-                outStr += "\n  <b>Volume:</b> " + baseVolume.ToString("F0");
+                outStr += $" (<b>Volume:</b> {baseVolume :F0})";
             return outStr;
         }
 
-        public Callback<Rect> GetDrawModulePanelCallback()
-        {
-            return null;
-        }
+        public Callback<Rect> GetDrawModulePanelCallback() => null;
 
         #endregion
 
@@ -371,17 +308,6 @@ namespace B9PartSwitch
             return managedStackNodeIDs.Contains(nodeName);
         }
 
-        public float TankVolumeForSubtype(int index)
-        {
-            if (index < 0 || index >= SubtypesCount)
-                throw new IndexOutOfRangeException("Index " + index.ToString() + " is out of range (there are " + SubtypesCount.ToString() + "subtypes.");
-            PartSubtype subtype = subtypes[index];
-            if (subtype == null || subtype.tankType == null || subtype.tankType.ResourcesCount == 0)
-                return 0f;
-            else
-                return baseVolume * subtype.volumeMultiplier + subtype.volumeAdded;
-        }
-
         #endregion
 
         #region Private Methods
@@ -399,33 +325,56 @@ namespace B9PartSwitch
 
         private void UpdateFromGUI(BaseField field, object oldFieldValueObj)
         {
-            SetNewSubtype(subtypeIndexControl, false);
+            BeginSubtypeChange(subtypeIndexControl);
         }
 
-        private void SetNewSubtype(int newIndex, bool force)
+        private void UpdateDragCubesOnAttach()
         {
+            part.OnEditorAttach -= UpdateDragCubesOnAttach;
+            RenderProceduralDragCubes();
+        }
+
+        private void BeginSubtypeChange(int newIndex)
+        {
+            if (newIndex < 0 || newIndex >= subtypes.Count)
+                throw new ArgumentException($"Subtype index must be between 0 and {subtypes.Count}");
+
             // For symmetry
             subtypeIndexControl = newIndex;
 
-            if (newIndex == currentSubtypeIndex && !force)
+            if (newIndex == currentSubtypeIndex)
                 return;
 
-            if (newIndex < 0 || newIndex >= subtypes.Count)
-                throw new ArgumentException("Subtype index must be between 0 and " + subtypes.Count.ToString());
+            SetNewSubtype(newIndex);
 
-            if (newIndex != currentSubtypeIndex)
-            {
-                CurrentSubtype.DeactivateObjects();
-                if (HighLogic.LoadedSceneIsEditor)
-                    CurrentSubtype.DeactivateNodes();
-            }
+            foreach (var counterpart in this.FindSymmetryCounterparts())
+                counterpart.SetNewSubtype(newIndex);
+
+            FireEvents();
+        }
+
+        private void SetNewSubtype(int newIndex)
+        {
+            CurrentSubtype.DeactivateObjects();
+            if (HighLogic.LoadedSceneIsEditor)
+                CurrentSubtype.DeactivateNodes();
 
             currentSubtypeIndex = newIndex;
 
             UpdateSubtype(true);
-
-            foreach (var counterpart in this.FindSymmetryCounterparts<ModuleB9PartSwitch>())
-                counterpart.SetNewSubtype(newIndex, force);
+        }
+        
+        private void FireEvents()
+        {
+            if (HighLogic.LoadedSceneIsEditor)
+            {
+                GameEvents.onEditorPartEvent.Fire(ConstructionEventType.PartTweaked, part);
+                GameEvents.onEditorShipModified.Fire(EditorLogic.fetch.ship);
+            }
+            else if (HighLogic.LoadedSceneIsFlight)
+            {
+                GameEvents.onVesselWasModified.Fire(this.vessel);
+            }
         }
 
         private void UpdateSubtype(bool fillTanks)
@@ -436,15 +385,21 @@ namespace B9PartSwitch
 
             UpdateTankSetup(fillTanks);
 
-            if (CurrentSubtype.maxTemp > 0)
-                part.maxTemp = CurrentSubtype.maxTemp;
-            else
-                part.maxTemp = part.GetPrefab().maxTemp;
+            if (MaxTempManaged)
+            {
+                if (CurrentSubtype.maxTemp > 0)
+                    part.maxTemp = CurrentSubtype.maxTemp;
+                else
+                    part.maxTemp = part.GetPrefab().maxTemp;
+            }
 
-            if (CurrentSubtype.skinMaxTemp > 0)
-                part.skinMaxTemp = CurrentSubtype.skinMaxTemp;
-            else
-                part.skinMaxTemp = part.GetPrefab().skinMaxTemp;
+            if (SkinMaxTempManaged)
+            {
+                if (CurrentSubtype.skinMaxTemp > 0)
+                    part.skinMaxTemp = CurrentSubtype.skinMaxTemp;
+                else
+                    part.skinMaxTemp = part.GetPrefab().skinMaxTemp;
+            }
 
             if (AttachNodeManaged && part.attachRules.allowSrfAttach && part.srfAttachNode != null)
             {
@@ -461,27 +416,17 @@ namespace B9PartSwitch
             
             if (affectDragCubes && managedTransformNames.Count > 0)
             {
-                DragCube newCube = DragCubeSystem.Instance.RenderProceduralDragCube(part);
-                part.DragCubes.ClearCubes();
-                part.DragCubes.Cubes.Add(newCube);
-                part.DragCubes.ResetCubeWeights();
+                if (HighLogic.LoadedSceneIsEditor && part.parent == null && EditorLogic.RootPart != part)
+                    part.OnEditorAttach += UpdateDragCubesOnAttach;
+                else
+                    RenderProceduralDragCubes();
             }
 
             var window = FindObjectsOfType<UIPartActionWindow>().FirstOrDefault(w => w.part == part);
             if (window.IsNotNull())
                 window.displayDirty = true;
 
-            if (HighLogic.LoadedSceneIsEditor)
-            {
-                GameEvents.onEditorPartEvent.Fire(ConstructionEventType.PartTweaked, part);
-                GameEvents.onEditorShipModified.Fire(EditorLogic.fetch.ship);
-            }
-            else if (HighLogic.LoadedSceneIsFlight)
-            {
-                GameEvents.onVesselWasModified.Fire(this.vessel);
-            }
-
-            LogInfo("Switched subtype to " + CurrentSubtype.Name);
+            LogInfo($"Switched subtype to {CurrentSubtype.Name}");
         }
 
         private void UpdateTankSetup(bool forceFull)
@@ -519,7 +464,7 @@ namespace B9PartSwitch
             for (int i = 0; i < CurrentTankType.resources.Count; i++)
             {
                 TankResource resource = CurrentTankType[i];
-                float resourceAmount = resource.unitsPerVolume * TankVolume;
+                float resourceAmount = resource.unitsPerVolume * CurrentVolume;
                 PartResource partResource = null;
                 if (resourceIndices[i] < 0)
                 {
@@ -550,6 +495,14 @@ namespace B9PartSwitch
             }
 
             part.Resources.UpdateList();
+        }
+
+        private void RenderProceduralDragCubes()
+        {
+            DragCube newCube = DragCubeSystem.Instance.RenderProceduralDragCube(part);
+            part.DragCubes.ClearCubes();
+            part.DragCubes.Cubes.Add(newCube);
+            part.DragCubes.ResetCubeWeights();
         }
 
         #endregion
