@@ -1,11 +1,9 @@
-﻿using System;
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 
 namespace B9PartSwitch
 {
-    [Serializable]
     public class TankResource : CFGUtilObject
     {
         [ConfigField(configName = "name")]
@@ -27,11 +25,11 @@ namespace B9PartSwitch
             return outStr;
         }
     }
-
-    [Serializable]
+    
     public class TankType : CFGUtilObject, IEnumerable<TankResource>
     {
         #region Loadable Fields
+
         [ConfigField(configName = "name")]
         public string tankName;
          
@@ -61,6 +59,10 @@ namespace B9PartSwitch
         public bool IsStructuralTankType => (tankName == B9TankSettings.structuralTankName) && (tankMass == 0f) && (tankCost == 0f) && (resources.Count == 0);
 
         public float ResourceUnitCost => resources.Sum(r => r.unitsPerVolume * r.resourceDefinition.unitCost);
+        public float TotalUnitCost => ResourceUnitCost + tankCost;
+
+        public bool ChangesMass => (tankMass != 0f) || (resources.Any(r => r.resourceDefinition.density != 0f));
+        public bool ChangesCost => (tankCost != 0f) || (resources.Any(r => r.resourceDefinition.unitCost != 0f));
 
         #endregion
 

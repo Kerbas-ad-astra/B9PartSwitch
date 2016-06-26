@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Globalization;
 using UnityEngine;
 
@@ -68,7 +67,7 @@ namespace B9PartSwitch
         {
             Type type = typeof(T);
             if (ParseTypes.ContainsKey(type))
-                return ParseTypes[type] as ParseType<T>;
+                return (ParseType<T>)ParseTypes[type];
             else
                 return null;
         }
@@ -125,9 +124,9 @@ namespace B9PartSwitch
             if (result == null)
             {
                 if (field.ElementType.DerivesFrom(typeof(Component)) && field.Parent is Component)
-                    result = (field.Parent as Component).gameObject.AddComponent(field.ElementType) as IConfigNode;
+                    result = (IConfigNode)((Component)field.Parent).gameObject.AddComponent(field.ElementType);
                 else if (field.ElementType.DerivesFrom(typeof(ScriptableObject)))
-                    result = ScriptableObject.CreateInstance(field.ElementType) as IConfigNode;
+                    result = (IConfigNode)ScriptableObject.CreateInstance(field.ElementType);
                 else
                 {
                     try
@@ -150,7 +149,7 @@ namespace B9PartSwitch
             Type type = value.GetType();
             if (value is string)
             {
-                return value as string;
+                return (string)value;
             }
             else if (IsRegisteredParseType(type))
             {

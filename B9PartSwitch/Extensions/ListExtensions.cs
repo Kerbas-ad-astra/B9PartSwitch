@@ -2,8 +2,6 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using UnityEngine;
 
 namespace B9PartSwitch
 {
@@ -22,5 +20,12 @@ namespace B9PartSwitch
                 return false;
             return t.GetInterfaces().Contains(typeof(IList)) && t.IsGenericType && t.GetGenericTypeDefinition().IsAssignableFrom(typeof(List<>));
         }
+
+        public static bool ValidIndex(this IList list, int index) => (index >= 0) && (index < list.Count);
+
+        public static bool SameElementsAs<T>(this IEnumerable<T> set1, IEnumerable<T> set2) =>
+            (set1.Count() == set2.Count()) &&
+            !set1.Except(set1).Any() &&
+            !set2.Except(set1).Any();
     }
 }

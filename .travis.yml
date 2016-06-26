@@ -1,0 +1,31 @@
+language: csharp
+solution: B9PartSwitch.sln
+install:
+  - build_script/install/install_ksp_dlls.sh
+  - nuget restore ${TRAVIS_SOLUTION}
+before_script:
+  - build_script/before_script/check_version.rb
+script:
+  - xbuild /p:Configuration=Release ${TRAVIS_SOLUTION}
+  - build_script/script/make_zip.sh
+before_deploy:
+  - build_script/before_deploy/copy_zip.sh
+deploy:
+  - provider: bintray
+    file: build_script/deploy/bintray_deploy.json
+    user: blowfishpro
+    key: ${BINTRAY_API_KEY}
+  - provider: releases
+    api_key: ${GITHUB_DEPLOY_TOKEN}
+    file: zip_release/github/*.zip
+    file_glob: true
+    name: "${PROJECT_NAME} ${TRAVIS_TAG} for KSP ${KSP_VERSION}"
+    on:
+      tags: true
+env:
+  global:
+    - PROJECT_NAME="B9PartSwitch"
+    - PROJECT_DIR="B9PartSwitch"
+    - KSP_VERSION="$(build_script/env/get_ksp_version.rb)"
+notifications:
+  email: false

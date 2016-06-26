@@ -34,8 +34,7 @@ namespace B9PartSwitch
                 collider.enabled = false;
         }
     }
-
-    [Serializable]
+    
     public class PartSubtype : CFGUtilObject
     {
         #region Config Fields
@@ -76,12 +75,14 @@ namespace B9PartSwitch
         [ConfigField]
         public AttachNode attachNode = null;
 
+        [ConfigField]
+        public float crashTolerance = 0f;
+
         #endregion
 
         #region Private Fields
         
         private ModuleB9PartSwitch parent;
-        private Part part;
         private List<TransformInfo> transforms = new List<TransformInfo>();
         private List<AttachNode> nodes = new List<AttachNode>();
 
@@ -91,11 +92,20 @@ namespace B9PartSwitch
 
         public string Name => subtypeName;
 
-        public bool HasTank => tankType != null && tankType.ResourcesCount > 0;
+        public Part Part => parent.part;
 
+        public bool HasTank => tankType != null && tankType.ResourcesCount > 0;
+        
+        public IEnumerable<string> ResourceNames => tankType.ResourceNames;
         public IEnumerable<string> NodeIDs => nodes.Select(n => n.id);
 
         public float TotalVolume => HasTank ? ((parent?.baseVolume ?? 0f) * volumeMultiplier + volumeAdded) : 0f;
+
+        public float TotalMass => TotalVolume * tankType.tankMass + addedMass;
+        public float TotalCost => TotalVolume * tankType.TotalUnitCost + addedCost;
+
+        public bool ChangesMass => (addedMass != 0f) || tankType.ChangesMass;
+        public bool ChangesCost => (addedCost != 0f) || tankType.ChangesCost;
 
         #endregion
 
@@ -112,7 +122,7 @@ namespace B9PartSwitch
                 title = subtypeName;
         }
 
-        public void SetParent(ModuleB9PartSwitch parent)
+        public void Setup(ModuleB9PartSwitch parent)
         {
             if (parent == null)
                 throw new ArgumentNullException("parent cannot be null");
@@ -120,7 +130,9 @@ namespace B9PartSwitch
                 throw new ArgumentNullException("parent.part cannot be null");
 
             this.parent = parent;
-            part = parent.part;
+
+            FindObjects();
+            FindNodes();
         }
 
         public void FindObjects()
@@ -131,9 +143,9 @@ namespace B9PartSwitch
             transforms = new List<TransformInfo>();
             foreach (var transformName in transformNames)
             {
-                Transform[] tempTransforms = part.FindModelTransforms(transformName);
+                Transform[] tempTransforms = Part.FindModelTransforms(transformName);
                 if (tempTransforms == null || tempTransforms.Length == 0)
-                    LogError($"No transformes named {transformName} found");
+                    LogError($"No transforms named {transformName} found");
                 else
                     transforms.AddRange(tempTransforms.Select(t => new TransformInfo(t)));
             }
@@ -147,7 +159,7 @@ namespace B9PartSwitch
             nodes = new List<AttachNode>();
             foreach (var nodeName in nodeNames)
             {
-                AttachNode[] tempNodes = part.findAttachNodes(nodeName);
+                AttachNode[] tempNodes = Part.findAttachNodes(nodeName);
                 if (tempNodes == null || tempNodes.Length == 0)
                 {
                     LogError($"No attach nodes matching {nodeName} found");
@@ -167,18 +179,45 @@ namespace B9PartSwitch
             }
         }
 
-        public void OnStart()
-        {
-            if (parent == null || part == null)
-                throw new InvalidOperationException("Parent or part has not been set");
-
-            FindObjects();
-            FindNodes();
-        }
-
         #endregion
 
         #region Public Methods
+
+        public void DeactivateOnStart()
+        {
+            DeactivateObjects();
+
+            if (HighLogic.LoadedSceneIsEditor)
+                DeactivateNodes();
+            else
+                ActivateNodes();
+        }
+
+        public void ActivateOnStart()
+        {
+            ActivateObjects();
+            ActivateNodes();
+            AddResources(false);
+        }
+
+        public void DeactivateOnSwitch()
+        {
+            DeactivateObjects();
+
+            if (HighLogic.LoadedSceneIsEditor)
+                DeactivateNodes();
+            else
+                ActivateNodes();
+
+            RemoveResources();
+        }
+
+        public void ActivateOnSwitch()
+        {
+            ActivateObjects();
+            ActivateNodes();
+            AddResources(true);
+        }
 
         public void ActivateObjects() => transforms.ForEach(t => t.Enable());
 
@@ -187,6 +226,23 @@ namespace B9PartSwitch
         public void DeactivateObjects() => transforms.ForEach(t => t.Disable());
 
         public void DeactivateNodes() => nodes.ForEach(n => n.Hide());
+
+        public void AddResources(bool fillTanks)
+        {
+            foreach (TankResource resource in tankType.resources)
+            {
+                float amount = TotalVolume * resource.unitsPerVolume * parent.VolumeScale;
+                Part.AddOrCreateResource(resource.resourceDefinition, amount, fillTanks ? amount : -1f);
+            }
+        }
+
+        public void RemoveResources()
+        {
+            foreach (TankResource resource in tankType.resources)
+            {
+                Part.RemoveResource(resource.ResourceName);
+            }
+        }
 
         public override string ToString()
         {

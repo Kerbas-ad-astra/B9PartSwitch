@@ -1,9 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using UnityEngine;
-using KSP;
 
 namespace B9PartSwitch
 {
@@ -63,7 +60,7 @@ namespace B9PartSwitch
             CheckTankDefs();
             if (string.IsNullOrEmpty(name))
                 return StructuralTankType;
-            return tankTypes[name].Clone() as TankType;
+            return (TankType)tankTypes[name].Clone();
         }
 
         public static bool TankTypeExists(string name)
