@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
+using UniLinq;
 using UnityEngine;
 
 namespace B9PartSwitch
@@ -67,27 +67,18 @@ namespace B9PartSwitch
         public bool ChangesMass => subtypes.Any(s => s.ChangesMass);
         public bool ChangesCost => subtypes.Any(s => s.ChangesCost);
 
-        public bool MaxTempManaged { get; private set; }
-        public bool SkinMaxTempManaged { get; private set; }
-        public bool AttachNodeManaged { get; private set; }
-        public bool CrashToleranceManaged { get; private set; }
-
+        public float Scale => scale;
         public float VolumeScale => scale * scale * scale;
-
-        public bool DisplayInfo => ChangesMass || ChangesCost || MaxTempManaged || SkinMaxTempManaged || CrashToleranceManaged;
 
         #endregion
 
         #region Setup
 
-        public override void OnLoad(ConfigNode node)
+        public override void OnIconCreate()
         {
-            base.OnLoad(node);
+            base.OnIconCreate();
 
-            // This will deactivate objects before the part icon is created, avoiding a visual mess
-
-            if (!this.ParsedPrefab())
-                SetupForIcon();
+            SetupForIcon();
         }
 
         public override void OnStart(PartModule.StartState state)
@@ -138,28 +129,13 @@ namespace B9PartSwitch
                     }
                 }
 
-                if (otherModule.MaxTempManaged && MaxTempManaged)
+                foreach (ISubtypePartField field in SubtypePartFields.All)
                 {
-                    LogError($"Two {nameof(ModuleB9PartSwitch)} modules cannot both manage the part's maxTemp");
-                    destroy = true;
-                }
-
-                if (otherModule.SkinMaxTempManaged && SkinMaxTempManaged)
-                {
-                    LogError($"Two {nameof(ModuleB9PartSwitch)} modules cannot both manage the part's skinMaxTemp");
-                    destroy = true;
-                }
-
-                if (otherModule.AttachNodeManaged && AttachNodeManaged)
-                {
-                    LogError($"Two {nameof(ModuleB9PartSwitch)} modules cannot both manage the part's attach node");
-                    destroy = true;
-                }
-
-                if (otherModule.CrashToleranceManaged && CrashToleranceManaged)
-                {
-                    LogError($"Two {nameof(ModuleB9PartSwitch)} modules cannot both manage the part's crash tolerance");
-                    destroy = true;
+                    if (PartFieldManaged(field) && otherModule.PartFieldManaged(field))
+                    {
+                        LogError($"Two {nameof(ModuleB9PartSwitch)} modules cannot both manage the part's {field.Name}");
+                        destroy = true;
+                    }
                 }
 
                 if (destroy)
@@ -255,6 +231,8 @@ namespace B9PartSwitch
             return managedStackNodeIDs.Contains(nodeName);
         }
 
+        public bool PartFieldManaged(ISubtypePartField field) => subtypes.Any(subtype => field.ShouldUseOnSubtype(subtype.Context));
+
         #endregion
 
         #region Private Methods
@@ -263,6 +241,7 @@ namespace B9PartSwitch
 
         private void SetupForIcon()
         {
+            // This will deactivate objects on non-active subtypes before the part icon is created, avoiding a visual mess
             foreach (var subtype in subtypes)
             {
                 subtype.Setup(this);
@@ -276,11 +255,6 @@ namespace B9PartSwitch
             managedResourceNames = new List<string>();
             managedTransformNames = new List<string>();
             managedStackNodeIDs = new List<string>();
-
-            MaxTempManaged = false;
-            SkinMaxTempManaged = false;
-            AttachNodeManaged = false;
-            CrashToleranceManaged = false;
 
             foreach (var subtype in subtypes)
             {
@@ -301,24 +275,12 @@ namespace B9PartSwitch
 
                 managedTransformNames.AddRange(subtype.transformNames);
                 managedStackNodeIDs.AddRange(subtype.NodeIDs);
+            }
 
-                if (subtype.maxTemp > 0f)
-                    MaxTempManaged = true;
-                if (subtype.skinMaxTemp > 0f)
-                    SkinMaxTempManaged = true;
-                if (subtype.attachNode.IsNotNull())
-                {
-                    if (part.attachRules.allowSrfAttach && part.srfAttachNode != null)
-                    {
-                        AttachNodeManaged = true;
-                    }
-                    else
-                    {
-                        LogError($"Error: Part subtype '{subtype.Name}' has an attach node defined, but part does not allow surface attachment (or the surface attach node could not be found)");
-                    }
-                }
-                if (subtype.crashTolerance > 0f)
-                    CrashToleranceManaged = true;
+            if (PartFieldManaged(SubtypePartFields.SrfAttachNode) && !part.attachRules.allowSrfAttach || part.srfAttachNode.IsNull())
+            {
+                LogError($"Error: One or more subtypes have an attach node defined, but part does not allow surface attachment (or the surface attach node could not be found)");
+                subtypes.ForEach(subtype => subtype.attachNode = null);
             }
         }
 
@@ -351,7 +313,7 @@ namespace B9PartSwitch
             {
                 // Now use resources
                 // This finds all the managed resources that currently exist on teh part
-                string[] resourcesOnPart = managedResourceNames.Intersect(part.Resources.list.Select(resource => resource.resourceName)).ToArray();
+                string[] resourcesOnPart = managedResourceNames.Intersect(part.Resources.Select(resource => resource.resourceName)).ToArray();
 
 #if DEBUG
                 LogInfo($"Managed resources found on part: [{string.Join(", ", resourcesOnPart)}]");
@@ -393,7 +355,6 @@ namespace B9PartSwitch
             subtypes.ForEach(subtype => subtype.DeactivateOnStart());
             RemoveUnusedResources();
             CurrentSubtype.ActivateOnStart();
-            UpdatePartParams();
             UpdateGeometry();
 
             LogInfo($"Switched subtype to {CurrentSubtype.Name}");
@@ -401,14 +362,12 @@ namespace B9PartSwitch
 
         private void RemoveUnusedResources()
         {
-            List<PartResource> resourceList = part.Resources.list;
-            for (int i = resourceList.Count - 1; i >= 0; i--)
+            for (int i = part.Resources.Count - 1; i >= 0 ; i --)
             {
-                PartResource resource = resourceList[i];
+                PartResource resource = part.Resources[i];
                 if (IsManagedResource(resource.resourceName) && !CurrentTankType.ContainsResource(resource.resourceName))
                 {
-                    resourceList.RemoveAt(i);
-                    Destroy(resource);
+                    part.Resources.Remove(resource);
                 }
             }
         }
@@ -424,7 +383,6 @@ namespace B9PartSwitch
             currentSubtypeName = CurrentSubtype.Name;
 
             CurrentSubtype.ActivateOnSwitch();
-            UpdatePartParams();
             UpdateGeometry();
             LogInfo($"Switched subtype to {CurrentSubtype.Name}");
 
@@ -443,7 +401,6 @@ namespace B9PartSwitch
             currentSubtypeName = CurrentSubtype.Name;
 
             CurrentSubtype.ActivateOnSwitch();
-            UpdatePartParams();
             UpdateGeometry();
             LogInfo($"Switched subtype to {CurrentSubtype.Name}");
         }
@@ -464,32 +421,6 @@ namespace B9PartSwitch
             else if (HighLogic.LoadedSceneIsFlight)
             {
                 GameEvents.onVesselWasModified.Fire(this.vessel);
-            }
-        }
-
-        private void UpdatePartParams()
-        {
-            if (MaxTempManaged)
-            {
-                part.maxTemp = (CurrentSubtype.maxTemp > 0f) ? CurrentSubtype.maxTemp : part.GetPrefab().maxTemp;
-            }
-
-            if (SkinMaxTempManaged)
-            {
-                part.skinMaxTemp = (CurrentSubtype.skinMaxTemp > 0f) ? CurrentSubtype.skinMaxTemp : part.GetPrefab().skinMaxTemp;
-            }
-
-            if (AttachNodeManaged && part.attachRules.allowSrfAttach && part.srfAttachNode != null)
-            {
-                var referenceNode = CurrentSubtype.attachNode ?? part.GetPrefab().srfAttachNode;
-                part.srfAttachNode.position = referenceNode.position * scale;
-                part.srfAttachNode.orientation = referenceNode.orientation;
-                // part.srfAttachNode.size = referenceNode.size;
-            }
-
-            if (CrashToleranceManaged)
-            {
-                part.crashTolerance = (CurrentSubtype.crashTolerance > 0f) ? CurrentSubtype.crashTolerance : part.GetPrefab().crashTolerance;
             }
         }
 

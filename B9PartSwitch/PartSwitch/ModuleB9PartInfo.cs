@@ -1,4 +1,4 @@
-﻿using System.Linq;
+﻿using UniLinq;
 using System.Collections.Generic;
 
 namespace B9PartSwitch
@@ -39,10 +39,9 @@ namespace B9PartSwitch
         [KSPField(guiName = "Crash Tolerance", guiFormat = "F0", guiUnits = "m/s")]
         public float crashTolerance;
 
-
         private void Start()
         {
-            if (HighLogic.LoadedSceneIsFlight || !part.Modules.OfType<ModuleB9PartSwitch>().Any(m => m.DisplayInfo))
+            if (HighLogic.LoadedSceneIsFlight || !part.Modules.OfType<ModuleB9PartSwitch>().Any(m => DisplayInfoOnSwitcher(m)))
             {
                 part.Modules.Remove(this);
                 Destroy(this);
@@ -64,7 +63,7 @@ namespace B9PartSwitch
         private void SetupGUI()
         {
             List<ModuleB9PartSwitch> switcherModules = part.FindModulesImplementing<ModuleB9PartSwitch>();
-            bool hasResources = part.Resources.list.Any(resource => resource.info.density != 0f);
+            bool hasResources = part.Resources.Any(resource => resource.info.density != 0f);
             bool showMass = switcherModules.Any(module => module.ChangesMass);
             bool showCost = switcherModules.Any(module => module.ChangesCost);
 
@@ -78,9 +77,9 @@ namespace B9PartSwitch
             dryCostField.guiName = hasResources ? Constants.DryCostGUIString : Constants.CostGUIString;
             Fields[nameof(wetCost)].guiActiveEditor = showInfo && showCost && hasResources;
 
-            Fields[nameof(maxTemp)].guiActiveEditor = showInfo && switcherModules.Any(module => module.MaxTempManaged);
-            Fields[nameof(skinMaxTemp)].guiActiveEditor = showInfo && switcherModules.Any(module => module.SkinMaxTempManaged);
-            Fields[nameof(crashTolerance)].guiActiveEditor = showInfo && switcherModules.Any(module => module.CrashToleranceManaged);
+            Fields[nameof(maxTemp)].guiActiveEditor = showInfo && switcherModules.Any(module => module.PartFieldManaged(SubtypePartFields.MaxTemp));
+            Fields[nameof(skinMaxTemp)].guiActiveEditor = showInfo && switcherModules.Any(module => module.PartFieldManaged(SubtypePartFields.SkinMaxTemp));
+            Fields[nameof(crashTolerance)].guiActiveEditor = showInfo && switcherModules.Any(module => module.PartFieldManaged(SubtypePartFields.CrashTolerance));
         }
 
         private void UpdateFields()
@@ -96,6 +95,16 @@ namespace B9PartSwitch
             maxTemp = (float)part.maxTemp;
             skinMaxTemp = (float)part.skinMaxTemp;
             crashTolerance = part.crashTolerance;
+        }
+
+        private bool DisplayInfoOnSwitcher(ModuleB9PartSwitch switcher)
+        {
+            return
+                switcher.ChangesMass ||
+                switcher.ChangesCost ||
+                switcher.PartFieldManaged(SubtypePartFields.MaxTemp) ||
+                switcher.PartFieldManaged(SubtypePartFields.SkinMaxTemp) ||
+                switcher.PartFieldManaged(SubtypePartFields.CrashTolerance);
         }
     }
 }

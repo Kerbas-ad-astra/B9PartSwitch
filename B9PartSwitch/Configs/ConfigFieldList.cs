@@ -1,6 +1,7 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
+using UniLinq;
 using UnityEngine;
 
 namespace B9PartSwitch
@@ -53,15 +54,9 @@ namespace B9PartSwitch
             }
         }
 
-        public IEnumerator<ConfigFieldInfo> GetEnumerator()
-        {
-            return configFields.GetEnumerator();
-        }
-
-        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
-        {
-            return this.GetEnumerator();
-        }
+        public List<ConfigFieldInfo>.Enumerator GetEnumerator() => configFields.GetEnumerator();
+        IEnumerator<ConfigFieldInfo> IEnumerable<ConfigFieldInfo>.GetEnumerator() => GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
         public ConfigFieldInfo this[string name] => configFields.FirstOrDefault(cf => cf.Name == name);
 
